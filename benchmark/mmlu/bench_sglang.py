@@ -2,11 +2,12 @@ import argparse
 import json
 import os
 import time
+from dataclasses import asdict
 
 import numpy as np
 import pandas as pd
 import tiktoken
-
+from sglang.srt.server_args import ServerArgs
 from sglang.test.test_utils import (
     add_common_sglang_args_and_parse,
     select_sglang_backend,
@@ -48,6 +49,9 @@ def gen_prompt(train_df, subject, k=-1):
 
 
 def main(args):
+    server_args = ServerArgs.from_cli_args(args)
+    print(f"server_args: {server_args}")
+
     subjects = sorted(
         [
             f.split("_test.csv")[0]
@@ -94,40 +98,72 @@ def main(args):
     #####################################
 
     import sglang as sgl
+    from sglang.lang.ir import SglSamplingParams
+    # if args.backend.startswith("gpt-"):
 
-    if args.backend.startswith("gpt-"):
+    #     @sgl.function
+    #     def few_shot_mmlu(s, examples, question):
+    #         s += sgl.user(examples + question)
+    #         s += sgl.assistant(sgl.gen("answer"))
 
-        @sgl.function
-        def few_shot_mmlu(s, examples, question):
-            s += sgl.user(examples + question)
-            s += sgl.assistant(sgl.gen("answer"))
+    # else:
 
-    else:
-
-        @sgl.function
-        def few_shot_mmlu(s, examples, question):
-            s += examples + question + sgl.gen("answer")
+    #     @sgl.function
+    #     def few_shot_mmlu(s, examples, question):
+    #         s += examples + question + sgl.gen("answer")
 
     #####################################
     ########## SGL Program End ##########
     #####################################
 
     # Select backend
-    backend = select_sglang_backend(args)
+#    backend = select_sglang_backend(args)
+    def create_prompts():
+        prompts = []
+        for argument in arguments:
+            prompts.append(argument["examples"] + argument["question"])
+        return prompts
+    prompts = create_prompts()
+    print(f"{len(prompts)=}:\n{prompts[0]}")
+    print(f"{len(arguments)} {arguments[0]}")
+    print(f"{len(labels)} {labels[0]}")
+    print(f"{len(subjects)} {subjects[0]}")
+    print(f"{len(num_questions)} {num_questions[0]}")
 
+    llm = sgl.Engine(**asdict(server_args))
+    sampling_params = dict(
+        max_new_tokens=1,
+        n=1,
+        temperature=0,
+        top_p=0.95,
+        top_k=40,
+        min_p=0,
+            # frequency_penalty=frequency_penalty,
+            # presence_penalty=presence_penalty,
+            # ignore_eos=ignore_eos,
+            # return_logprob=return_logprob,
+            # logprob_start_len=logprob_start_len,
+            # top_logprobs_num=top_logprobs_num,
+            # return_text_in_logprobs=return_text_in_logprobs,
+        )
+    outputs = llm.generate(prompts, sampling_params)
+  #  print(f"{outputs=}")
     # Run
     tic = time.time()
-    states = few_shot_mmlu.run_batch(
-        arguments,
-        temperature=0,
-        max_new_tokens=1,
-        backend=backend,
-        num_threads=args.parallel,
-        progress_bar=True,
-    )
-    preds = [
-        s["answer"].strip()[0] if len(s["answer"].strip()) > 0 else "" for s in states
-    ]
+    # states = few_shot_mmlu.run_batch(
+    #     arguments,
+    #     temperature=0,
+    #     max_new_tokens=1,
+    #     backend=backend,
+    #     num_threads=args.parallel,
+    #     progress_bar=True,
+    # )
+    def normalize_output(output):
+        return output["text"].strip()[0] if len(output["text"].strip()) > 0 else ""
+    preds = [normalize_output(output) for output in outputs]
+    # preds = [
+    #     s["answer"].strip()[0] if len(s["answer"].strip()) > 0 else "" for s in states
+    # ]
     latency = time.time() - tic
 
     # Compute accuracy
@@ -150,18 +186,23 @@ def main(args):
     with open(args.result_file, "a") as fout:
         value = {
             "task": "mmlu",
-            "backend": args.backend,
+#            "backend": args.backend,
             "num_gpus": 1,
             "latency": round(latency, 3),
             "accuracy": round(weighted_acc, 3),
             "num_requests": len(arguments),
-            "other": {
+            # "other": {
                 "nsub": args.nsub,
-                "parallel": args.parallel,
-            },
+                # "parallel": args.parallel,
+            # },
         }
         fout.write(json.dumps(value) + "\n")
 
+def override_model_path(parser):
+    for action in parser._actions:
+        if action.dest == 'model_path':
+            action.required = False
+            action.default = "meta-llama/Llama-3.2-1B-Instruct"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -169,5 +210,15 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", "-d", type=str, default="data")
     parser.add_argument("--save_dir", "-s", type=str, default="results")
     parser.add_argument("--nsub", type=int, default=60)
-    args = add_common_sglang_args_and_parse(parser)
+    parser.add_argument("--result_file", "-r", type=str, default="mmlu.jsonl")
+    ServerArgs.add_cli_args(parser)
+    override_model_path(parser)
+    args = parser.parse_args()
+    #args = argparse.Namespace(**{arg: getattr(args, arg) for arg in vars(args) if arg not in asdict(server_args)})
+    #print(f"args: {args}")
+
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir)
+    args.result_file = os.path.join(args.save_dir, args.result_file)
     main(args)
+

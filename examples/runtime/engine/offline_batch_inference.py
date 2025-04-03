@@ -1,8 +1,11 @@
 """
 Usage:
-python3 offline_batch_inference.py  --model meta-llama/Llama-3.1-8B-Instruct
+python3 offline_batch_inference.py  --model meta-llama/Llama-3.2-1B-Instruct
 """
 
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 import argparse
 import dataclasses
 
@@ -38,6 +41,14 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     ServerArgs.add_cli_args(parser)
+    
+    # Modify the existing model_path argument
+    for action in parser._actions:
+        if action.dest == 'model_path':
+            action.required = False
+            action.default = "meta-llama/Llama-3.2-1B-Instruct"
+    print(f"parser.get_default('model_path'): {parser.get_default('model_path')}")
     args = parser.parse_args()
+    logging.info(f"args: {args}")
     server_args = ServerArgs.from_cli_args(args)
     main(server_args)
