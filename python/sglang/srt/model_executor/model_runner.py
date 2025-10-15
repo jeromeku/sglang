@@ -254,6 +254,11 @@ class ModelRunner:
         req_to_token_pool: Optional[ReqToTokenPool] = None,
         token_to_kv_pool_allocator: Optional[BaseTokenToKVPoolAllocator] = None,
     ):
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
+
         # Parse args
         self.mem_fraction_static = mem_fraction_static
         self.device = server_args.device
@@ -351,6 +356,11 @@ class ModelRunner:
             self.piecewise_cuda_graph_runner = None
 
     def initialize(self, min_per_gpu_memory: float):
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
+        
         server_args = self.server_args
 
         self.memory_saver_adapter = TorchMemorySaverAdapter.create(
@@ -674,6 +684,10 @@ class ModelRunner:
                     )
 
     def init_torch_distributed(self):
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
         logger.info("Init torch distributed begin.")
 
         try:
@@ -789,6 +803,11 @@ class ModelRunner:
         return min_per_gpu_memory
 
     def load_model(self):
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
+
         before_avail_memory = get_available_gpu_memory(self.device, self.gpu_id)
         logger.info(
             f"Load weight begin. avail mem={get_available_gpu_memory(self.device, self.gpu_id):.2f} GB"
@@ -1324,6 +1343,11 @@ class ModelRunner:
         return result
 
     def profile_max_num_token(self, total_gpu_memory: int):
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
+
         available_gpu_memory = get_available_gpu_memory(
             self.device,
             self.gpu_id,
@@ -1549,6 +1573,11 @@ class ModelRunner:
         max_num_reqs: Optional[int] = None,
         max_total_tokens: Optional[int] = None,
     ):
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
+
         # Determine the kv cache dtype
         if self.server_args.kv_cache_dtype == "auto":
             quant_config = getattr(self.model, "quant_config", None)
@@ -1961,6 +1990,10 @@ class ModelRunner:
 
     def init_device_graphs(self):
         """Capture device graphs."""
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
         self.graph_runner = None
         self.graph_mem_usage = 0
 
@@ -2042,6 +2075,11 @@ class ModelRunner:
         skip_attn_backend_init: bool = False,
         pp_proxy_tensors=None,
     ) -> LogitsProcessorOutput:
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
+
         if not skip_attn_backend_init:
             self.attn_backend.init_forward_metadata(forward_batch)
         # FIXME: add pp_proxy_tensors arg to all models
@@ -2061,6 +2099,11 @@ class ModelRunner:
         skip_attn_backend_init: bool = False,
         pp_proxy_tensors=None,
     ) -> LogitsProcessorOutput:
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
+
         if not skip_attn_backend_init:
             self.attn_backend.init_forward_metadata(forward_batch)
 
@@ -2086,6 +2129,10 @@ class ModelRunner:
     def forward_idle(
         self, forward_batch: ForwardBatch, pp_proxy_tensors=None
     ) -> LogitsProcessorOutput:
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
         kwargs = {}
         if self.support_pp:
             kwargs["pp_proxy_tensors"] = pp_proxy_tensors
@@ -2125,6 +2172,11 @@ class ModelRunner:
         reinit_attn_backend: bool = False,
         split_forward_count: int = 1,
     ) -> Tuple[Union[LogitsProcessorOutput, PPProxyTensors], bool]:
+        frames = inspect.stack()
+        for i in range(3, 0, -1):
+            frame = frames[i]
+            print(f"MODELRUNNER::{frames[0].function}:callstack({i}) {frame.filename}:{frame.lineno}")
+
         self.forward_pass_id += 1
 
         with get_global_expert_distribution_recorder().with_forward_pass(
