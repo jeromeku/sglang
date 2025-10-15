@@ -173,3 +173,121 @@ Detokenization
 Tracing / Metrics
 - Enable OpenTelemetry traces: `ServerArgs.enable_trace` + `oltp_traces_endpoint`.
 - Turn on tokenizer/scheduler metrics and histograms via `enable_metrics` and bucket tunables.
+
+
+## Component Internals (Deep Dive)
+
+This section breaks down each component into subcomponents with precise hooks to tweak or extend behavior.
+
+### TokenizerManager (TM)
+
+- Construction and Sockets
+  - Class: [python/sglang/srt/managers/tokenizer_manager.py#L146](python/sglang/srt/managers/tokenizer_manager.py#L146)
+  - Sockets: `recv_from_detokenizer`, `send_to_scheduler` initialized at [#L255-L269](python/sglang/srt/managers/tokenizer_manager.py#L255-L269)
+  - Multi-tokenizer routing switches socket choice ([#L260-L268](python/sglang/srt/managers/tokenizer_manager.py#L260-L268))
+
+- Request Normalization (batch shape, parallel sampling, rid management)
+  - Normalization pipeline: `GenerateReqInput.normalize_batch_and_arguments()` [python/sglang/srt/managers/io_struct.py#L286-L359](python/sglang/srt/managers/io_struct.py#L286-L359)
+  - Key helpers: `_validate_inputs` [#L341](python/sglang/srt/managers/io_struct.py#L341), `_determine_batch_size` [#L355](python/sglang/srt/managers/io_struct.py#L355), `_handle_parallel_sampling` [#L377](python/sglang/srt/managers/io_struct.py#L377)
+  - TM-side orchestration: `generate_request(...)` [python/sglang/srt/managers/tokenizer_manager.py#L370-L414](python/sglang/srt/managers/tokenizer_manager.py#L370-L414)
+
+- Tokenization & SamplingParams
+  - Batch and single tokenize: `_tokenize_texts` [#L474](python/sglang/srt/managers/tokenizer_manager.py#L474), `_tokenize_one_request` [#L554-L610](python/sglang/srt/managers/tokenizer_manager.py#L554-L610)
+  - Build tokenized object (sets `SamplingParams`, validates): `_create_tokenized_object` [#L706-L740](python/sglang/srt/managers/tokenizer_manager.py#L706-L740)
+  - Sampling params normalization/verify: `SamplingParams.normalize/verify` [python/sglang/srt/sampling/sampling_params.py]
+
+- Multimodal Preprocessing
+  - MM processor pipeline: [#L589-L605](python/sglang/srt/managers/tokenizer_manager.py#L589-L605) using `get_mm_processor`
+
+- LoRA & Model Update Coordination
+  - LoRA registry and acquire/release: [#L300-L309](python/sglang/srt/managers/tokenizer_manager.py#L300-L309), release in `_handle_batch_output` [#L1390-L1411](python/sglang/srt/managers/tokenizer_manager.py#L1390-L1411)
+  - Update lock & pause: `model_update_lock`, `is_pause_cond` at [#L291-L299](python/sglang/srt/managers/tokenizer_manager.py#L291-L299)
+
+- Batching Modes
+  - Single send: `_send_one_request` [#L812-L824](python/sglang/srt/managers/tokenizer_manager.py#L812-L824)
+  - Batched send: `_send_batch_request` (uses `BatchTokenizedGenerateReqInput`) [#L826-L849](python/sglang/srt/managers/tokenizer_manager.py#L826-L849)
+  - Batch orchestration: `_handle_batch_request` [#L900-L1040](python/sglang/srt/managers/tokenizer_manager.py#L900-L1040)
+
+- Result Dispatch & Streaming
+  - Dispatcher and handle loop: [#L342-L368](python/sglang/srt/managers/tokenizer_manager.py#L342-L368), `handle_loop` [#L1318-L1325](python/sglang/srt/managers/tokenizer_manager.py#L1318-L1325)
+  - Output assembly: `_handle_batch_output` [#L1306-L1399](python/sglang/srt/managers/tokenizer_manager.py#L1306-L1399)
+  - Per-chunk streaming yield: `_wait_one_response` [#L850-L899](python/sglang/srt/managers/tokenizer_manager.py#L850-L899)
+
+Tweak ideas
+- Replace `_tokenize_texts` for custom tokenization, or set `input_ids` to bypass it.
+- Inject per-request logic in `_create_tokenized_object` (e.g., set default `SamplingParams`).
+- Wrap `_handle_batch_output` to augment `meta_info` or add metrics.
+
+### Scheduler (Sched)
+
+- Construction and Sockets
+  - Class: [python/sglang/srt/managers/scheduler.py#L280](python/sglang/srt/managers/scheduler.py#L280)
+  - ZMQ sockets setup and rank role: [#L340-L373](python/sglang/srt/managers/scheduler.py#L340-L373)
+  - Tracing setup within subprocess: [#L3031-L3036](python/sglang/srt/managers/scheduler.py#L3031-L3036)
+
+- Initialization: Model, Tokenizer, Grammar, Policy
+  - `ModelConfig` from args, tokenizer init: [#L374-L438](python/sglang/srt/managers/scheduler.py#L374-L438)
+  - Grammar backend: [#L648-L671](python/sglang/srt/managers/scheduler.py#L648-L671)
+  - Schedule policy creation: [#L672-L693](python/sglang/srt/managers/scheduler.py#L672-L693) and policy impl [schedule_policy.py](python/sglang/srt/managers/schedule_policy.py#L1)
+
+- Memory Pool & Caches
+  - KV cache pools chosen based on arch/hybrid/mamba: `ModelRunner.init_memory_pool_and_cache()` (see [python/sglang/srt/model_executor/model_runner.py#L1600+](python/sglang/srt/model_executor/model_runner.py#L1600))
+  - Request/token pool allocators selected in `ModelRunner` [#L1700+](python/sglang/srt/model_executor/model_runner.py#L1700)
+
+- Ingress & Broadcast
+  - `recv_requests()` pulls from tokenizer, splits work/control, broadcasts across TP/DP [#L1200-L1298](python/sglang/srt/managers/scheduler.py#L1200-L1298)
+  - `process_input_requests()` dispatches to request handlers [#L1299-L1332](python/sglang/srt/managers/scheduler.py#L1299-L1332)
+
+- Request Handling
+  - `handle_generate_request(...)` builds runtime `Req`, validates, sets logprob regions, handles multimodal expansion [#L1335-L1479](python/sglang/srt/managers/scheduler.py#L1335-L1479)
+  - Grammar queue readiness and prefill-only cases are staged before batching.
+
+- Batch Assembly and Flow
+  - `get_next_batch_to_run()` merges prefill with running decode batches, handles mixed chunked prefill, DP attention prep [#L2400-L2492](python/sglang/srt/managers/scheduler.py#L2400-L2492)
+  - `update_running_batch(...)` retracts when out of KV memory, updates ratios [#L2140-L2199](python/sglang/srt/managers/scheduler.py#L2140-L2199)
+  - Chunked prefill specifics and HiCache integration appear along this path.
+
+- GPU Execution
+  - Orchestrated by `run_batch(...)` [#L2180](python/sglang/srt/managers/scheduler.py#L2180), which invokes `TpModelWorker.forward_batch_generation(...)` [python/sglang/srt/managers/tp_worker.py#L214](python/sglang/srt/managers/tp_worker.py#L214)
+  - Prefill-only fast path computes logprobs without full sampling.
+
+- Output Processing & Streaming
+  - Token ids/logits packaged to detok: `send_to_detokenizer(BatchTokenIDOutput)` [python/sglang/srt/managers/scheduler_output_processor_mixin.py#L899](python/sglang/srt/managers/scheduler_output_processor_mixin.py#L899)
+
+Tweak ideas
+- Add a new scheduling policy branch in `SchedulePolicy` or adjust thresholds (e.g., in-batch prefix caching constants).
+- Modify retract/merge rules in `update_running_batch` to tune decode packing.
+- Enable deterministic inference or swap attention backend to aid reproducibility.
+
+### TpModelWorker and ModelRunner
+
+- TpModelWorker wrapper
+  - Creates `ModelRunner`, holds tokenizer (for some models), exposes forward helpers [python/sglang/srt/managers/tp_worker.py#L95-L214](python/sglang/srt/managers/tp_worker.py#L95-L214)
+
+- ModelRunner lifecycle
+  - Init and device/distributed setup: [python/sglang/srt/model_executor/model_runner.py#L236-L353](python/sglang/srt/model_executor/model_runner.py#L236-L353)
+  - Torch distributed + model parallel init: [#L700-L770](python/sglang/srt/model_executor/model_runner.py#L700-L770)
+  - Weight loading via loader registry: [#L1004-L1200](python/sglang/srt/model_executor/model_runner.py#L1004-L1200), registry [python/sglang/srt/model_loader/loader.py#L1917](python/sglang/srt/model_loader/loader.py#L1917)
+  - Attention/backend selection & CUDA graphs: [#L1200-L1540](python/sglang/srt/model_executor/model_runner.py#L1200-L1540)
+  - KV memory pools and allocators: [#L1560-L1860](python/sglang/srt/model_executor/model_runner.py#L1560-L1860)
+  - Forward & sampling: `forward(...)`, `sample(...)` [#L1860+](python/sglang/srt/model_executor/model_runner.py#L1860)
+  - LoRA manager and dynamic load: [#L1290-L1340](python/sglang/srt/model_executor/model_runner.py#L1290-L1340)
+
+Tweak ideas
+- Insert hooks in `forward` to log intermediate tensors (rank-0 only) or enable `CUDA_LAUNCH_BLOCKING=1` for kernel-error clarity.
+- Force `attention_backend="torch_native"` for simpler step-by-step debugging.
+- Use `bench_one_batch.py` to drive `ModelRunner` standalone for iterative debugging.
+
+### DetokenizerManager (Detok)
+
+- Class and event loop
+  - Class: [python/sglang/srt/managers/detokenizer_manager.py#L72](python/sglang/srt/managers/detokenizer_manager.py#L72)
+  - Event loop: [#L114-L120](python/sglang/srt/managers/detokenizer_manager.py#L114-L120)
+
+- Incremental Decoding Internals
+  - `DecodeStatus` ring with `surr_offset`, `read_offset`, `sent_offset` [#L60-L70](python/sglang/srt/managers/detokenizer_manager.py#L60-L70)
+  - Batch decode → strings; compute deltas; stop trimming: [#L138-L189](python/sglang/srt/managers/detokenizer_manager.py#L138-L189)
+
+Tweak ideas
+- Adjust `trim_matched_stop` and stop-trim options to change output shaping.
+- Increase `SGLANG_DETOKENIZER_MAX_STATES` for large concurrent streaming workloads.
