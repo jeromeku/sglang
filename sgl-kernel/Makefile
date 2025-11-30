@@ -24,6 +24,11 @@ ln: submodule ## Create compilation database
 install: submodule ## Install package in development mode
 	@pip install -e . --no-build-isolation
 
+dev: install-deps submodule
+	@SKBUILD_CMAKE_BUILD_TYPE=RelWithDebInfo \
+	  CMAKE_ARGS="-DCMAKE_VERBOSE_MAKEFILE=1 -DCMAKE_EXPORT_COMPILE_COMMANDS=1" \
+	  pip install -e . --no-build-isolation -Cbuild-dir=build
+
 build: install-deps submodule ## Build and install wheel package
 	@rm -rf dist/* || true && CMAKE_POLICY_VERSION_MINIMUM=3.5 MAX_JOBS=$(nproc) CMAKE_BUILD_PARALLEL_LEVEL=$(nproc) uv build --wheel -Cbuild-dir=build . --verbose --color=always --no-build-isolation && pip3 install dist/*whl --force-reinstall --no-deps
 
