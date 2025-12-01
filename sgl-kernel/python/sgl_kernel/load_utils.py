@@ -44,8 +44,32 @@ def _filter_compiled_extensions(file_list):
     # Return compiled files first, then others
     return compiled_files + other_files
 
+def _import_module_from_file(path: str | Path):
+    """
+    Import module from file
+    Args:
+        path (str | Path): Path to module
+    Returns:
+        tuple[ModuleSpec, ModuleType]
+
+    Raises:
+        ImportError if spec or module cannot be imported from path
+    """
+    # normalize path
+    path = str(path)
+
+    spec = importlib.util.spec_from_file_location("common_ops", str(path))
+    if spec is None:
+        raise ImportError(f"Could not create module spec for {path}")
+
+    module = importlib.util.module_from_spec(spec)
+    if spec.loader is None:
+        raise ImportError(f"Module spec has no loader for {path}")
+
+    return spec, module
 
 def _load_architecture_specific_ops():
+    breakpoint()
     """Load the appropriate common_ops library based on GPU architecture."""
     compute_capability = _get_compute_capability()
     logger.debug(
@@ -85,14 +109,7 @@ def _load_architecture_specific_ops():
         ops_path = Path(matching_files[0])  # Use the first prioritized file
         logger.debug(f"[sgl_kernel] Found architecture-specific library: {ops_path}")
         try:
-            # Load the module from specific path using importlib
-            spec = importlib.util.spec_from_file_location("common_ops", str(ops_path))
-            if spec is None:
-                raise ImportError(f"Could not create module spec for {ops_path}")
-
-            common_ops = importlib.util.module_from_spec(spec)
-            if spec.loader is None:
-                raise ImportError(f"Module spec has no loader for {ops_path}")
+            spec, common_ops = _import_module_from_file(ops_path)
 
             logger.debug(f"[sgl_kernel] Loading module from {ops_path}...")
             spec.loader.exec_module(common_ops)
@@ -123,14 +140,7 @@ def _load_architecture_specific_ops():
         alt_path = Path(alt_matching_files[0])  # Use the first prioritized file
         logger.debug(f"[sgl_kernel] Found fallback library: {alt_path}")
         try:
-            spec = importlib.util.spec_from_file_location("common_ops", str(alt_path))
-            if spec is None:
-                raise ImportError(f"Could not create module spec for {alt_path}")
-
-            common_ops = importlib.util.module_from_spec(spec)
-            if spec.loader is None:
-                raise ImportError(f"Module spec has no loader for {alt_path}")
-
+            spec, common_ops = _import_module_from_file(alt_path)
             logger.debug(f"[sgl_kernel] Loading fallback module from {alt_path}...")
             spec.loader.exec_module(common_ops)
             logger.debug(f"[sgl_kernel] ✓ Successfully loaded fallback library")

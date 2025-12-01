@@ -194,6 +194,7 @@ class Engine(EngineBase):
         The arguments of this function is the same as `sglang/srt/managers/io_struct.py::GenerateReqInput`.
         Please refer to `GenerateReqInput` for the documentation.
         """
+        breakpoint()
         if self.server_args.enable_dp_attention:
             if data_parallel_rank is None:
                 logger.debug("data_parallel_rank not provided, using default dispatch")
@@ -790,7 +791,7 @@ def _launch_subprocesses(
     configure_logger(server_args)
     server_args.check_server_args()
     _set_envs_and_config(server_args)
-
+    breakpoint()
     # Allocate ports for inter-process communications
     if port_args is None:
         port_args = PortArgs.init_new(server_args)

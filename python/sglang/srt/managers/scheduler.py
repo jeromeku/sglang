@@ -232,6 +232,7 @@ class Scheduler(
         pp_rank: int,
         dp_rank: Optional[int],
     ):
+        breakpoint()
         # Parse args
         self.server_args = server_args
         self.tp_rank = tp_rank
@@ -673,6 +674,7 @@ class Scheduler(
         )
 
     def init_tokenizer(self):
+        breakpoint()
         server_args = self.server_args
         self.is_generation = self.model_config.is_generation
 
@@ -2602,6 +2604,7 @@ def run_scheduler_process(
     dp_rank: Optional[int],
     pipe_writer,
 ):
+    breakpoint()
     # Generate the logger prefix
     prefix = ""
     if dp_rank is None and "SGLANG_DP_RANK" in os.environ:

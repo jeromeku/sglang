@@ -246,7 +246,7 @@ def load_model(server_args, port_args, gpu_id, tp_rank):
     suppress_other_loggers()
     rank_print = print if tp_rank == 0 else lambda *args, **kwargs: None
     moe_ep_rank = tp_rank // (server_args.tp_size // server_args.ep_size)
-
+    breakpoint()
     model_config = ModelConfig.from_server_args(server_args)
     model_runner = ModelRunner(
         model_config=model_config,
@@ -649,7 +649,7 @@ def latency_test(
     reqs = prepare_synthetic_inputs_for_latency_test(
         bench_args.batch_size[0], bench_args.input_len[0]
     )
-
+    breakpoint()
     # Warm up
     rank_print("Warmup ...")
     latency_test_run_once(

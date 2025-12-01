@@ -1337,7 +1337,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         out_cache_loc, req_pool_indices_tensor, req_pool_indices = alloc_for_extend(
             self
         )
-
+        breakpoint()
         # Set fields
         input_embeds = []
         extend_input_logprob_token_ids = []
